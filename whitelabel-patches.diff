@@ -1,0 +1,843 @@
+diff --git a/CLAUDE.md b/CLAUDE.md
+new file mode 100644
+index 00000000..85a4e8b5
+--- /dev/null
++++ b/CLAUDE.md
+@@ -0,0 +1,278 @@
++# CLAUDE.md
++
++This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
++
++## Project Overview
++
++**Uptime Kuma** is a self-hosted monitoring tool for HTTP(s), TCP, DNS, Docker containers, and many other services. The project is built with Vue 3 (frontend) and Node.js/Express (backend), using Socket.IO for real-time communication between client and server.
++
++## Essential Commands
++
++### Setup and Installation
++```bash
++npm ci                    # Install dependencies (use ci, NOT install)
++```
++
++### Development
++```bash
++npm run dev              # Start both frontend (port 3000) and backend (port 3001)
++npm run start-frontend-dev   # Start only frontend dev server
++npm run start-server-dev     # Start only backend dev server
++npm run start-server-dev:watch  # Start backend with auto-reload
++```
++
++### Building
++```bash
++npm run build            # Build frontend to dist/ (~90-120 seconds)
++```
++
++### Linting
++```bash
++npm run lint             # Run both JS and style linters
++npm run lint:js          # Lint JavaScript/Vue files
++npm run lint:style       # Lint CSS/SCSS files
++npm run lint-fix:js      # Auto-fix JavaScript issues
++npm run lint-fix:style   # Auto-fix style issues
++npm run lint:prod        # Production lint (zero warnings allowed)
++```
++
++### Testing
++```bash
++npm test                 # Run all tests (backend + e2e)
++npm run test-backend     # Run backend unit tests only
++npm run test-e2e         # Run Playwright e2e tests
++npm run test-e2e-ui      # Run Playwright with UI
++npm run tsc              # Run TypeScript type checking (note: ~1400 errors expected, ignore them)
++```
++
++### Running Tests on Single File
++```bash
++# Backend tests use Node.js test runner
++node --test test/backend-test/your-test-file.js
++
++# E2E tests
++npx playwright test tests/your-test.spec.js --config ./config/playwright.config.js
++```
++
++## Architecture Overview
++
++### Core Communication Pattern
++
++Uptime Kuma uses **Socket.IO as the primary communication method** between frontend and backend, NOT REST APIs. This is a fundamental architectural decision:
++
++- Most backend logic lives in `server/socket-handlers/` as Socket.IO event handlers
++- Frontend state management and socket logic is in `src/mixins/socket.js`
++- Express.js is mainly used for serving static files and status page APIs
++- Data flows: Client emits socket event → Server handles in socket-handler → Server emits response → Client updates state
++
++### Directory Structure
++
++```
++server/                      # Backend (Node.js/Express)
++├── socket-handlers/         # Socket.IO event handlers (main backend logic)
++├── monitor-types/           # Monitor type implementations (http, tcp, dns, etc.)
++├── notification-providers/  # Notification service integrations (90+ providers)
++├── model/                   # Database models (auto-mapped to SQLite tables)
++├── routers/                 # Express routers (status page, API routes)
++├── jobs/                    # Background jobs running in separate processes
++├── modules/                 # Modified 3rd-party modules
++├── monitor-conditions/      # Monitor condition evaluators
++├── server.js               # Server entry point
++└── uptime-kuma-server.js   # UptimeKumaServer singleton class
++
++src/                        # Frontend (Vue 3 SPA)
++├── components/             # Vue components
++│   └── notifications/      # Notification provider UI components
++├── pages/                  # Page-level components
++├── mixins/                 # Vue mixins (socket.js contains main state/logic)
++├── lang/                   # i18n translation files (managed via Weblate)
++├── layouts/                # Layout components
++├── assets/                 # Static assets
++├── router.js              # Vue Router configuration
++├── main.js                # Frontend entry point
++└── util.ts                # Shared utility functions
++
++db/
++├── knex_migrations/        # Database migration files using Knex.js
++└── kuma.db                # SQLite database (gitignored)
++
++test/
++├── backend-test/           # Backend unit tests
++└── e2e/                   # Playwright E2E tests
++
++config/                     # Build and test configuration
++├── vite.config.js         # Vite build configuration
++└── playwright.config.js   # Playwright test configuration
++```
++
++### Key Architectural Patterns
++
++1. **Singleton Server Pattern**: `UptimeKumaServer.getInstance()` provides global access to the server instance
++2. **Monitor Type Registry**: Monitor types are registered in `UptimeKumaServer.monitorTypeList`
++3. **Notification Provider Pattern**: Each provider has matching backend (`server/notification-providers/`) and frontend (`src/components/notifications/`) files
++4. **Socket.IO Event Pattern**: Events are organized by domain (general, maintenance, docker, etc.) in separate socket-handler files
++5. **Shared Dependencies**: Both frontend and backend use the same `package.json`; frontend deps are devDependencies, backend deps are dependencies
++
++### Data Flow Example
++
++When a monitor is created:
++1. Frontend: `EditMonitor.vue` emits `add` socket event
++2. Backend: `server/socket-handlers/general-socket-handler.js` handles `add` event
++3. Backend: Creates monitor in database via `Monitor` model (`server/model/monitor.js`)
++4. Backend: Starts monitoring loop, emits `monitorList` event to update clients
++5. Frontend: `socket.js` mixin receives `monitorList`, updates Vue reactive state
++6. Frontend: Components reactively update to show new monitor
++
++### Database Architecture
++
++- **Primary**: SQLite with Redbean-node ORM
++- **Supported**: MariaDB, MySQL, PostgreSQL (via connection string)
++- **Migrations**: Knex.js migrations in `db/knex_migrations/`
++- **Models**: Auto-mapped to table names (e.g., `Monitor` model → `monitor` table)
++- **Schema Evolution**: Always use migrations, never direct schema changes
++
++## Code Style Requirements
++
++These rules are **strictly enforced** by linters and CI:
++
++- **Indentation**: 4 spaces (no tabs)
++- **Quotes**: Double quotes for strings
++- **Line Endings**: Unix (LF), not Windows (CRLF)
++- **Semicolons**: Required
++- **JSDoc**: Required for all functions and methods
++- **Naming Conventions**:
++  - JavaScript/TypeScript: `camelCase`
++  - SQLite columns: `snake_case`
++  - CSS/SCSS: `kebab-case`
++
++## Adding New Features
++
++### Adding a New Notification Provider
++
++Required file changes (in order):
++
++1. **`server/notification-providers/YourProvider.js`**
++   - Extend `NotificationProvider` class
++   - Implement `name` property and `send(notification, msg, monitorJSON, heartbeatJSON)` method
++   - Wrap axios calls in try/catch with `this.throwGeneralAxiosError(error)`
++   - Handle both null `monitorJSON` (testing) and null `heartbeatJSON` (cert expiry)
++
++2. **`server/notification.js`**
++   - Import and register your provider in the exports object
++
++3. **`src/components/notifications/YourProvider.vue`**
++   - Create form with notification settings
++   - Use `HiddenInput` component for secrets/credentials
++   - Add all strings to `src/lang/en.json` for translation
++   - Include help text and placeholders for easy setup
++
++4. **`src/components/notifications/index.js`**
++   - Import and register frontend component
++
++5. **`src/components/NotificationDialog.vue`**
++   - Add provider to either regional or global list
++
++6. **Test and document** with screenshots in PR:
++   - UP/DOWN notifications
++   - Certificate expiry (test with https://expired.badssl.com/)
++   - Test button functionality
++
++### Adding a New Monitor Type
++
++Required file changes (in order):
++
++1. **`server/monitor-types/your-type.js`**
++   - Extend `MonitorType` class
++   - Implement `name` property and `async check(monitor, heartbeat, server)` method
++   - Throw descriptive errors for failures
++   - Set `heartbeat.msg` and `heartbeat.status = UP` for success
++
++2. **`server/uptime-kuma-server.js`**
++   - Import and register in `UptimeKumaServer.monitorTypeList`
++
++3. **`src/pages/EditMonitor.vue`**
++   - Add UI for monitor-specific settings
++   - Use `HiddenInput` for credentials
++   - Add translation keys to `src/lang/en.json`
++   - Include help text and validation
++
++## Translation Management
++
++- **ONLY** add strings to `src/lang/en.json` in your PRs
++- **NEVER** edit other language files directly (managed via Weblate)
++- Use `{{ $t("key") }}` in Vue templates
++- Use `<i18n-t keypath="key">` for complex translations with HTML
++
++## Database Migrations
++
++When modifying the database schema:
++
++1. Create migration: `npx knex migrate:make your_migration_name --knexfile db/knex_init_db.js`
++2. Edit migration file in `db/knex_migrations/`
++3. Test migration: `npm run test-backend`
++4. Filename format is validated by CI (`node ./extra/check-knex-filenames.mjs`)
++
++## White-Label / Multi-Tenant Configuration
++
++Uptime Kuma supports environment-based limits for white-label and multi-tenant deployments via `server/white-label-config.js`:
++
++### Environment Variables
++
++- **`UPTIMEKUMA_WH_MAX_MONITORS`**: Maximum number of monitors per user (0 = unlimited)
++- **`UPTIMEKUMA_WH_MIN_INTERVAL`**: Minimum monitor interval in seconds (0 = use default 20s)
++- **`UPTIMEKUMA_WH_MAX_KEEP_DAYS`**: Maximum data retention period in days (0 = unlimited)
++- **`UPTIMEKUMA_WH_MAX_STATUSPAGES`**: Maximum number of status pages (0 = unlimited)
++- **`UPTIMEKUMA_WH_USERNAME`** / **`UPTIMEKUMA_WH_PASSWORD`**: Auto-create initial user on first start
++
++### Implementation Details
++
++**Backend enforcement:**
++- Monitor limits: `server/server.js` (add/edit handlers)
++- Status page limits: `server/socket-handlers/status-page-socket-handler.js`
++- Data retention cap: `server/jobs/clear-old-data.js` + `server/server.js` (setSettings handler)
++- Auto-user creation: `server/server.js` (initDatabase function)
++
++**Frontend integration:**
++- Config exposed via `sendInfo()` in `server/client.js`
++- Stored in `$root.whiteLabelConfig` via `src/mixins/socket.js`
++- UI validation in `src/pages/EditMonitor.vue` and `src/components/settings/MonitorHistory.vue`
++- Translation keys in `src/lang/en.json` (prefix: `whitelabel.*`)
++
++**Key features:**
++- All limits are optional (0 = disabled)
++- Server-side validation prevents API abuse
++- Frontend shows warnings when limits are enforced
++- Values are automatically capped (both frontend and backend)
++
++## Git Workflow
++
++- **Main branch**: `master` (v2 development)
++- **Legacy branch**: `1.23.X` (v1 maintenance)
++- Base new features on `master`
++- Keep PRs small and focused (one issue per PR when possible)
++- Run `npm run lint` before committing
++- All CI checks must pass (linting, tests, build)
++- PRs start as drafts, mark ready for review when complete
++
++## Important Notes
++
++- **Node.js version**: >= 20.4.0 required
++- **Use `npm ci`**, not `npm install` (for reproducible builds)
++- **Build before testing**: Always run `npm run build` before `npm test`
++- **TypeScript errors**: `npm run tsc` shows ~1400 errors - this is expected, they don't affect builds
++- **Port usage**: Dev frontend uses 3000, dev backend uses 3001
++- **First run**: "db-config.json not found" is expected - starts setup wizard
++- **Dependencies**: 5 known vulnerabilities acknowledged - don't "fix" without discussion
++- **`.npmrc`**: Has `legacy-peer-deps=true` - required for dependency resolution
++- **Socket.IO first**: Remember that most backend logic uses Socket.IO, not REST APIs
++- **Frontend state**: Most shared state lives in `src/mixins/socket.js`, not in individual components
++
++## Testing Checklist
++
++Before submitting a PR:
++- [ ] `npm run lint` passes with no errors
++- [ ] `npm run build` completes successfully
++- [ ] `npm run test-backend` passes
++- [ ] Code follows style guidelines (4 spaces, double quotes, JSDoc on functions)
++- [ ] New features have translation keys in `src/lang/en.json`
++- [ ] No sensitive data committed (check `.env`, credentials, etc.)
+diff --git a/Dockerfile b/Dockerfile
+new file mode 100644
+index 00000000..953edd92
+--- /dev/null
++++ b/Dockerfile
+@@ -0,0 +1,95 @@
++############################################
++# Build Stage
++############################################
++FROM node:25-alpine AS builder
++
++WORKDIR /app
++
++# Install build dependencies
++RUN apk add --no-cache \
++    python3 \
++    make \
++    g++ \
++    sqlite
++
++# Copy package files
++ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=1
++COPY .npmrc package.json package-lock.json ./
++
++# Install ALL dependencies (including devDependencies for build)
++RUN npm ci
++
++# Copy application files
++COPY . .
++
++# Build frontend (creates dist/ directory) and clean up build cache
++RUN npm run build && \
++    npm cache clean --force && \
++    rm -rf /root/.npm /tmp/*
++
++# Remove devDependencies to reduce size
++RUN npm ci --omit=dev
++
++# Create data directory with correct ownership
++RUN mkdir -p ./data
++
++############################################
++# Runtime Stage
++############################################
++FROM node:25-alpine
++
++WORKDIR /app
++
++# Install runtime dependencies
++# sqlite = database access
++# curl = health checks and debugging
++# iputils = for ping monitor type
++# dumb-init = proper signal handling and zombie process reaping
++# apprise = notification framework for 90+ services
++RUN apk add --no-cache \
++    sqlite \
++    curl \
++    iputils \
++    dumb-init \
++    tzdata \
++    ca-certificates \
++    apprise --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community
++
++# Create uptime-kuma user with UID/GID 3001
++RUN addgroup -g 3001 uptime-kuma && \
++    adduser -D -u 3001 -G uptime-kuma uptime-kuma
++
++# Copy only necessary files from builder
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/dist /app/dist
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/src /app/src
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/node_modules /app/node_modules
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/server /app/server
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/db /app/db
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/extra /app/extra
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/package.json /app/package.json
++COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/.npmrc /app/.npmrc
++
++# Create data directory with correct ownership
++RUN mkdir -p /app/data && \
++    chown uptime-kuma:uptime-kuma /app/data
++
++# Set environment
++ENV NODE_ENV=production \
++    UPTIME_KUMA_IS_CONTAINER=1
++
++# Declare volume
++VOLUME ["/app/data"]
++
++# Switch to non-root user
++USER uptime-kuma
++
++# Expose port
++EXPOSE 3001
++
++# Health check
++HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=5 \
++    CMD node extra/healthcheck
++
++# Start application
++ENTRYPOINT ["/usr/bin/dumb-init", "--"]
++CMD ["node", "server/server.js"]
+diff --git a/server/client.js b/server/client.js
+index 72f0a4e8..03ee51d3 100644
+--- a/server/client.js
++++ b/server/client.js
+@@ -9,6 +9,7 @@ const io = server.io;
+ const { setting } = require("./util-server");
+ const checkVersion = require("./check-version");
+ const Database = require("./database");
++const WhiteLabelConfig = require("./white-label-config");
+
+ /**
+  * Send list of notification providers to client
+@@ -162,6 +163,7 @@ async function sendInfo(socket, hideVersion = false) {
+         primaryBaseURL: await setting("primaryBaseURL"),
+         serverTimezone: await server.getTimezone(),
+         serverTimezoneOffset: server.getTimezoneOffset(),
++        whiteLabelConfig: WhiteLabelConfig.toJSON(),
+     });
+ }
+
+diff --git a/server/jobs/clear-old-data.js b/server/jobs/clear-old-data.js
+index cfd65a8a..726f42fa 100644
+--- a/server/jobs/clear-old-data.js
++++ b/server/jobs/clear-old-data.js
+@@ -3,6 +3,7 @@ const { log } = require("../../src/util");
+ const Database = require("../database");
+ const { Settings } = require("../settings");
+ const dayjs = require("dayjs");
++const WhiteLabelConfig = require("../white-label-config");
+
+ const DEFAULT_KEEP_PERIOD = 365;
+
+@@ -30,6 +31,12 @@ const clearOldData = async () => {
+         parsedPeriod = DEFAULT_KEEP_PERIOD;
+     }
+
++    // Cap to maximum configured retention if set
++    if (WhiteLabelConfig.maxKeepDays > 0 && parsedPeriod > WhiteLabelConfig.maxKeepDays) {
++        log.info("clearOldData", `Capping retention period from ${parsedPeriod} to ${WhiteLabelConfig.maxKeepDays} days (enforced limit)`);
++        parsedPeriod = WhiteLabelConfig.maxKeepDays;
++    }
++
+     if (parsedPeriod < 1) {
+         log.info("clearOldData", `Data deletion has been disabled as period is less than 1. Period is ${parsedPeriod} days.`);
+     } else {
+diff --git a/server/server.js b/server/server.js
+index 207710a9..d9fd4f06 100644
+--- a/server/server.js
++++ b/server/server.js
+@@ -39,6 +39,7 @@ if (!semver.satisfies(nodeVersion, requiredNodeVersions)) {
+ const args = require("args-parser")(process.argv);
+ const { sleep, log, getRandomInt, genSecret, isDev } = require("../src/util");
+ const config = require("./config");
++const WhiteLabelConfig = require("./white-label-config");
+
+ log.debug("server", "Arguments");
+ log.debug("server", args);
+@@ -169,6 +170,9 @@ app.use(function (req, res, next) {
+ let needSetup = false;
+
+ (async () => {
++    // Initialize white-label configuration (must be before database init for auto-user creation)
++    WhiteLabelConfig.init();
++
+     // Create a data directory
+     Database.initDataDir(args);
+
+@@ -701,6 +705,18 @@ let needSetup = false;
+         socket.on("add", async (monitor, callback) => {
+             try {
+                 checkLogin(socket);
++
++                // Check monitor limit
++                if (WhiteLabelConfig.maxMonitors > 0) {
++                    if (!socket.userID) {
++                        throw new Error("User ID is not available");
++                    }
++                    const currentCount = await R.count("monitor", " user_id = ? ", [ socket.userID ]);
++                    if (currentCount >= WhiteLabelConfig.maxMonitors) {
++                        throw new Error(`Monitor limit reached. Maximum ${WhiteLabelConfig.maxMonitors} monitors allowed.`);
++                    }
++                }
++
+                 let bean = R.dispense("monitor");
+
+                 let notificationIDList = monitor.notificationIDList;
+@@ -734,6 +750,11 @@ let needSetup = false;
+                 bean.import(monitor);
+                 bean.user_id = socket.userID;
+
++                // Enforce minimum interval if configured
++                if (WhiteLabelConfig.minInterval > 0 && bean.interval < WhiteLabelConfig.minInterval) {
++                    throw new Error(`Monitor interval too short. Minimum ${WhiteLabelConfig.minInterval} seconds required.`);
++                }
++
+                 bean.validate();
+
+                 await R.store(bean);
+@@ -896,6 +917,11 @@ let needSetup = false;
+                 bean.ping_count = monitor.ping_count;
+                 bean.ping_per_request_timeout = monitor.ping_per_request_timeout;
+
++                // Enforce minimum interval if configured
++                if (WhiteLabelConfig.minInterval > 0 && bean.interval < WhiteLabelConfig.minInterval) {
++                    throw new Error(`Monitor interval too short. Minimum ${WhiteLabelConfig.minInterval} seconds required.`);
++                }
++
+                 bean.validate();
+
+                 await R.store(bean);
+@@ -1416,6 +1442,15 @@ let needSetup = false;
+                 const previousChromeExecutable = await Settings.get("chromeExecutable");
+                 const previousNSCDStatus = await Settings.get("nscd");
+
++                // Enforce maximum data retention if configured
++                if (WhiteLabelConfig.maxKeepDays > 0 && data.keepDataPeriodDays) {
++                    const requestedDays = parseInt(data.keepDataPeriodDays);
++                    if (requestedDays > WhiteLabelConfig.maxKeepDays) {
++                        log.warn("settings", `Capping keepDataPeriodDays from ${requestedDays} to ${WhiteLabelConfig.maxKeepDays} (enforced limit)`);
++                        data.keepDataPeriodDays = WhiteLabelConfig.maxKeepDays;
++                    }
++                }
++
+                 await setSettings("general", data);
+                 server.entryPage = data.entryPage;
+
+@@ -1776,6 +1811,21 @@ async function initDatabase(testMode = false) {
+     if ((await R.knex("user").count("id as count").first()).count === 0) {
+         log.info("server", "No user, need setup");
+         needSetup = true;
++
++        // Auto-create user if credentials provided via environment variables
++        if (WhiteLabelConfig.autoUsername && WhiteLabelConfig.autoPassword) {
++            log.info("server", `Auto-creating user: ${WhiteLabelConfig.autoUsername}`);
++            try {
++                let user = R.dispense("user");
++                user.username = WhiteLabelConfig.autoUsername;
++                user.password = await passwordHash.generate(WhiteLabelConfig.autoPassword);
++                await R.store(user);
++                needSetup = false;
++                log.info("server", "Auto-user created successfully");
++            } catch (e) {
++                log.error("server", `Failed to auto-create user: ${e.message}`);
++            }
++        }
+     }
+
+     server.jwtSecret = jwtSecretBean.value;
+diff --git a/server/socket-handlers/status-page-socket-handler.js b/server/socket-handlers/status-page-socket-handler.js
+index 939f1b5a..acc6ea77 100644
+--- a/server/socket-handlers/status-page-socket-handler.js
++++ b/server/socket-handlers/status-page-socket-handler.js
+@@ -7,6 +7,7 @@ const Database = require("../database");
+ const apicache = require("../modules/apicache");
+ const StatusPage = require("../model/status_page");
+ const { UptimeKumaServer } = require("../uptime-kuma-server");
++const WhiteLabelConfig = require("../white-label-config");
+
+ /**
+  * Socket handlers for status page
+@@ -266,6 +267,14 @@ module.exports.statusPageSocketHandler = (socket) => {
+         try {
+             checkLogin(socket);
+
++            // Check status page limit
++            if (WhiteLabelConfig.maxStatusPages > 0) {
++                const currentCount = await R.count("status_page");
++                if (currentCount >= WhiteLabelConfig.maxStatusPages) {
++                    throw new Error(`Status page limit reached. Maximum ${WhiteLabelConfig.maxStatusPages} status pages allowed.`);
++                }
++            }
++
+             title = title?.trim();
+             slug = slug?.trim();
+
+diff --git a/server/white-label-config.js b/server/white-label-config.js
+new file mode 100644
+index 00000000..b642d824
+--- /dev/null
++++ b/server/white-label-config.js
+@@ -0,0 +1,111 @@
++const { log } = require("../src/util");
++
++/**
++ * White-label configuration for multi-tenant deployments
++ * Reads environment variables to enforce limits and defaults
++ */
++class WhiteLabelConfig {
++
++    /**
++     * Maximum number of monitors allowed (0 = unlimited)
++     * @type {number}
++     */
++    static maxMonitors = 0;
++
++    /**
++     * Minimum allowed monitor interval in seconds (0 = use default 20s)
++     * @type {number}
++     */
++    static minInterval = 0;
++
++    /**
++     * Maximum data retention period in days (0 = unlimited)
++     * @type {number}
++     */
++    static maxKeepDays = 0;
++
++    /**
++     * Maximum number of status pages allowed (0 = unlimited)
++     * @type {number}
++     */
++    static maxStatusPages = 0;
++
++    /**
++     * Auto-create username on first start (if no users exist)
++     * @type {string|null}
++     */
++    static autoUsername = null;
++
++    /**
++     * Auto-create password on first start (if no users exist)
++     * @type {string|null}
++     */
++    static autoPassword = null;
++
++    /**
++     * Initialize configuration from environment variables
++     */
++    static init() {
++        // Read and validate environment variables
++        this.maxMonitors = this.parsePositiveInt(process.env.UPTIMEKUMA_WH_MAX_MONITORS, "UPTIMEKUMA_WH_MAX_MONITORS");
++        this.minInterval = this.parsePositiveInt(process.env.UPTIMEKUMA_WH_MIN_INTERVAL, "UPTIMEKUMA_WH_MIN_INTERVAL");
++        this.maxKeepDays = this.parsePositiveInt(process.env.UPTIMEKUMA_WH_MAX_KEEP_DAYS, "UPTIMEKUMA_WH_MAX_KEEP_DAYS");
++        this.maxStatusPages = this.parsePositiveInt(process.env.UPTIMEKUMA_WH_MAX_STATUSPAGES, "UPTIMEKUMA_WH_MAX_STATUSPAGES");
++
++        // Read auto-user credentials
++        this.autoUsername = process.env.UPTIMEKUMA_WH_USERNAME || null;
++        this.autoPassword = process.env.UPTIMEKUMA_WH_PASSWORD || null;
++
++        // Log active limits
++        if (this.maxMonitors > 0) {
++            log.info("white-label", `Monitor limit: ${this.maxMonitors}`);
++        }
++        if (this.minInterval > 0) {
++            log.info("white-label", `Minimum interval: ${this.minInterval}s`);
++        }
++        if (this.maxKeepDays > 0) {
++            log.info("white-label", `Maximum data retention: ${this.maxKeepDays} days`);
++        }
++        if (this.maxStatusPages > 0) {
++            log.info("white-label", `Status page limit: ${this.maxStatusPages}`);
++        }
++        if (this.autoUsername && this.autoPassword) {
++            log.info("white-label", "Auto-user creation enabled");
++        }
++    }
++
++    /**
++     * Parse a positive integer from environment variable
++     * @param {string|undefined} value Environment variable value
++     * @param {string} name Variable name for logging
++     * @returns {number} Parsed value or 0 if invalid/not set
++     */
++    static parsePositiveInt(value, name) {
++        if (!value) {
++            return 0;
++        }
++
++        const parsed = parseInt(value, 10);
++        if (isNaN(parsed) || parsed < 0) {
++            log.warn("white-label", `Invalid value for ${name}: "${value}" - must be a positive integer`);
++            return 0;
++        }
++
++        return parsed;
++    }
++
++    /**
++     * Get configuration as object for frontend
++     * @returns {object} Configuration object
++     */
++    static toJSON() {
++        return {
++            maxMonitors: this.maxMonitors,
++            minInterval: this.minInterval,
++            maxKeepDays: this.maxKeepDays,
++            maxStatusPages: this.maxStatusPages,
++        };
++    }
++}
++
++module.exports = WhiteLabelConfig;
+diff --git a/src/components/settings/MonitorHistory.vue b/src/components/settings/MonitorHistory.vue
+index 25e3e155..fe64cf5b 100644
+--- a/src/components/settings/MonitorHistory.vue
++++ b/src/components/settings/MonitorHistory.vue
+@@ -7,7 +7,7 @@
+                         settings.keepDataPeriodDays,
+                     ])
+                 }}
+-                {{ $t("infiniteRetention") }}
++                {{ maxKeepDays > 0 ? "" : $t("infiniteRetention") }}
+             </label>
+             <input
+                 id="keepDataPeriodDays"
+@@ -16,11 +16,15 @@
+                 class="form-control"
+                 required
+                 min="0"
++                :max="maxKeepDays > 0 ? maxKeepDays : undefined"
+                 step="1"
+             />
+             <div v-if="settings.keepDataPeriodDays < 0" class="form-text">
+                 {{ $t("dataRetentionTimeError") }}
+             </div>
++            <div v-if="maxKeepDays > 0" class="form-text text-warning">
++                {{ $t("whitelabel.maxKeepDaysEnforced", { days: maxKeepDays }) }}
++            </div>
+         </div>
+         <div class="my-4">
+             <button class="btn btn-primary" type="button" @click="saveSettings()">
+@@ -91,13 +95,39 @@ export default {
+                 Math.round((this.databaseSize / 1024 / 1024) * 10) / 10 + " MB"
+             );
+         },
++        maxKeepDays() {
++            return this.$root.whiteLabelConfig?.maxKeepDays || 0;
++        },
+     },
+
+     mounted() {
+         this.loadDatabaseSize();
++        this.capKeepDataPeriod();
++    },
++
++    watch: {
++        "settings.keepDataPeriodDays"(newValue) {
++            // Cap the value if it exceeds the maximum
++            if (this.maxKeepDays > 0 && newValue > this.maxKeepDays) {
++                this.settings.keepDataPeriodDays = this.maxKeepDays;
++            }
++        },
++        settingsLoaded() {
++            this.capKeepDataPeriod();
++        },
+     },
+
+     methods: {
++        /**
++         * Cap keepDataPeriodDays to maxKeepDays if enforced
++         * @returns {void}
++         */
++        capKeepDataPeriod() {
++            if (this.maxKeepDays > 0 && this.settings.keepDataPeriodDays > this.maxKeepDays) {
++                this.settings.keepDataPeriodDays = this.maxKeepDays;
++            }
++        },
++
+         /**
+          * Get the current size of the database
+          * @returns {void}
+diff --git a/src/lang/en.json b/src/lang/en.json
+index df167729..778eecdb 100644
+--- a/src/lang/en.json
++++ b/src/lang/en.json
+@@ -1176,5 +1176,11 @@
+     "Send DOWN silently": "Send DOWN silently",
+     "Installing a Nextcloud Talk bot requires administrative access to the server.": "Installing a Nextcloud Talk bot requires administrative access to the server.",
+     "Number of retry attempts if webhook fails": "Number of retry attempts (every 60-180 seconds) if the webhook fails.",
+-    "Maximum Retries": "Maximum Retries"
++    "Maximum Retries": "Maximum Retries",
++    "whitelabel.minIntervalEnforced": "Minimum interval enforced: {seconds} seconds",
++    "whitelabel.maxKeepDaysEnforced": "Maximum data retention enforced: {days} days (infinite retention disabled)",
++    "whitelabel.monitorLimitReached": "Monitor limit reached ({current}/{max})",
++    "whitelabel.statusPageLimitReached": "Status page limit reached ({current}/{max})",
++    "whitelabel.monitorCount": "Monitors: {current}/{max}",
++    "whitelabel.statusPageCount": "Status Pages: {current}/{max}"
+ }
+diff --git a/src/mixins/socket.js b/src/mixins/socket.js
+index 3272e042..8d607843 100644
+--- a/src/mixins/socket.js
++++ b/src/mixins/socket.js
+@@ -26,6 +26,12 @@ export default {
+     data() {
+         return {
+             info: { },
++            whiteLabelConfig: {
++                maxMonitors: 0,
++                minInterval: 0,
++                maxKeepDays: 0,
++                maxStatusPages: 0,
++            },
+             socket: {
+                 token: null,
+                 firstConnect: true,
+@@ -117,6 +123,9 @@ export default {
+
+             socket.on("info", (info) => {
+                 this.info = info;
++                if (info.whiteLabelConfig) {
++                    this.whiteLabelConfig = info.whiteLabelConfig;
++                }
+             });
+
+             socket.on("setup", (monitorID, data) => {
+diff --git a/src/pages/EditMonitor.vue b/src/pages/EditMonitor.vue
+index 425cf4ff..9e4adf15 100644
+--- a/src/pages/EditMonitor.vue
++++ b/src/pages/EditMonitor.vue
+@@ -632,6 +632,9 @@
+                                 <div class="form-text">
+                                     {{ monitor.humanReadableInterval }}
+                                 </div>
++                                <div v-if="$root.whiteLabelConfig && $root.whiteLabelConfig.minInterval > MIN_INTERVAL_SECOND" class="form-text text-warning">
++                                    {{ $t("whitelabel.minIntervalEnforced", { seconds: minInterval }) }}
++                                </div>
+                             </div>
+
+                             <div class="my-3">
+@@ -1246,7 +1249,7 @@ export default {
+
+     data() {
+         return {
+-            minInterval: MIN_INTERVAL_SECOND,
++            MIN_INTERVAL_SECOND: MIN_INTERVAL_SECOND,
+             maxInterval: MAX_INTERVAL_SECOND,
+             processing: false,
+             monitor: {
+@@ -1272,6 +1275,14 @@ export default {
+     },
+
+     computed: {
++        minInterval() {
++            // Use configured minimum interval if set, otherwise use default
++            if (this.$root.whiteLabelConfig && this.$root.whiteLabelConfig.minInterval > 0) {
++                return Math.max(this.$root.whiteLabelConfig.minInterval, MIN_INTERVAL_SECOND);
++            }
++            return MIN_INTERVAL_SECOND;
++        },
++
+         timeoutStep() {
+             return this.monitor.type === "ping" ? 1 : 0.1;
+         },
+@@ -1752,6 +1763,14 @@ message HealthCheckResponse {
+                     ping_per_request_timeout: 2,
+                 };
+
++                // Adjust interval to enforced minimum if necessary (use nextTick to ensure computed is ready)
++                this.$nextTick(() => {
++                    if (this.minInterval > this.monitor.interval) {
++                        this.monitor.interval = this.minInterval;
++                        this.monitor.humanReadableInterval = relativeTimeFormatter.secondsToHumanReadableFormat(this.minInterval);
++                    }
++                });
++
+                 if (this.$root.proxyList && !this.monitor.proxyId) {
+                     const proxy = this.$root.proxyList.find(proxy => proxy.default);
+
