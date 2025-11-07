@@ -27,11 +27,9 @@ RUN npm run build && \
     npm cache clean --force && \
     rm -rf /root/.npm /tmp/*
 
-# Remove devDependencies to reduce size
+# Remove devDependencies to reduce image size
 RUN npm ci --omit=dev
 
-# Create data directory with correct ownership
-RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
 
 ############################################
 # Runtime Stage
@@ -59,7 +57,7 @@ RUN apk add --no-cache \
 RUN addgroup -g 3001 uptime-kuma && \
     adduser -D -u 3001 -G uptime-kuma uptime-kuma
 
-# Copy only necessary files from builder
+# Copy built files from builder stage
 COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/dist /app/dist
 COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/src /app/src
 COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/node_modules /app/node_modules
@@ -69,7 +67,10 @@ COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/extra /app/extra
 COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/package.json /app/package.json
 COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/.npmrc /app/.npmrc
 
-# Set environment
+# Create the /app/data directory in the runtime image (needed for Docker copy-up)
+RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
+
+# Environment variables
 ENV NODE_ENV=production \
     UPTIME_KUMA_IS_CONTAINER=1
 
@@ -83,6 +84,6 @@ EXPOSE 3001
 HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=5 \
     CMD node extra/healthcheck
 
-# Start application
+# Start the application
 ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 CMD ["node", "server/server.js"]
