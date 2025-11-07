@@ -69,7 +69,7 @@ COPY --from=builder --chown=3001:3001 /app/package.json /app/package.json
 COPY --from=builder --chown=3001:3001 /app/.npmrc /app/.npmrc
 
 # Create the /app/data directory (docker will populate it from image on first mount)
-RUN mkdir -p /app/data && chown -R 3001:3001 /app
+RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
 
 # Copy entrypoint script
 COPY entrypoint.sh /entrypoint.sh
