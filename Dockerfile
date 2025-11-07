@@ -83,4 +83,5 @@ HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=5 \
     CMD node extra/healthcheck
 
 # Start the application
-ENTRYPOINT ["/usr/bin/dumb-init", "--", "sh", "-c", "chown -R 3001:3001 /app/data 2>/dev/null || true; exec su-exec 3001:3001 node server/server.js"]
+USER root
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "sh", "-c", "chown -R 3001:3001 /app/data && chmod -R 755 /app/data && exec su-exec 3001:3001 node server/server.js"]
