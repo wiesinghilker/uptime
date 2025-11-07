@@ -31,7 +31,7 @@ RUN npm run build && \
 RUN npm ci --omit=dev
 
 # Create data directory with correct ownership
-RUN mkdir -p ./data
+RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
 
 ############################################
 # Runtime Stage
