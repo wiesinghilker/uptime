@@ -50,6 +50,7 @@ RUN apk add --no-cache \
     iputils \
     dumb-init \
     tzdata \
+    su-exec \
     ca-certificates \
     apprise --repository=https://dl-cdn.alpinelinux.org/alpine/edge/community
 
@@ -74,9 +75,6 @@ RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
 ENV NODE_ENV=production \
     UPTIME_KUMA_IS_CONTAINER=1
 
-# Switch to non-root user
-USER uptime-kuma
-
 # Expose port
 EXPOSE 3001
 
@@ -85,5 +83,4 @@ HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=5 \
     CMD node extra/healthcheck
 
 # Start the application
-ENTRYPOINT ["/usr/bin/dumb-init", "--"]
-CMD ["node", "server/server.js"]
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "sh", "-c", "chown -R 3001:3001 /app/data 2>/dev/null || true; exec su-exec 3001:3001 node server/server.js"]
