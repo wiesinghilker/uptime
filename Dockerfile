@@ -58,18 +58,22 @@ RUN apk add --no-cache \
 RUN addgroup -g 3001 uptime-kuma && \
     adduser -D -u 3001 -G uptime-kuma uptime-kuma
 
-# Copy built files from builder stage
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/dist /app/dist
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/src /app/src
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/node_modules /app/node_modules
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/server /app/server
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/db /app/db
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/extra /app/extra
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/package.json /app/package.json
-COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/.npmrc /app/.npmrc
+# Copy built files from builder stage (owned by uptime-kuma user)
+COPY --from=builder --chown=3001:3001 /app/dist /app/dist
+COPY --from=builder --chown=3001:3001 /app/src /app/src
+COPY --from=builder --chown=3001:3001 /app/node_modules /app/node_modules
+COPY --from=builder --chown=3001:3001 /app/server /app/server
+COPY --from=builder --chown=3001:3001 /app/db /app/db
+COPY --from=builder --chown=3001:3001 /app/extra /app/extra
+COPY --from=builder --chown=3001:3001 /app/package.json /app/package.json
+COPY --from=builder --chown=3001:3001 /app/.npmrc /app/.npmrc
 
-# Create the /app/data directory in the runtime image (needed for Docker copy-up)
-RUN mkdir -p /app/data && chown -R 3001:3001 /app/data
+# Create the /app/data directory (docker will populate it from image on first mount)
+RUN mkdir -p /app/data && chown -R 3001:3001 /app
+
+# Copy entrypoint script
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Environment variables
 ENV NODE_ENV=production \
@@ -82,6 +86,6 @@ EXPOSE 3001
 HEALTHCHECK --interval=60s --timeout=30s --start-period=180s --retries=5 \
     CMD node extra/healthcheck
 
-# Start the application
-USER root
-ENTRYPOINT ["/usr/bin/dumb-init", "--", "sh", "-c", "chown -R 3001:3001 /app/data && chmod -R 755 /app/data && exec su-exec 3001:3001 node server/server.js"]
+# Start as root (entrypoint will switch to uptime-kuma user)
+ENTRYPOINT ["/usr/bin/dumb-init", "--", "/entrypoint.sh"]
+CMD ["node", "server/server.js"]

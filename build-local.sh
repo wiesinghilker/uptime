@@ -53,6 +53,7 @@ echo "Applied whitelabel-patches.diff"
 echo ""
 echo "Copying custom Dockerfile..."
 cp "${SCRIPT_DIR}/Dockerfile" Dockerfile
+cp "${SCRIPT_DIR}/entrypoint.sh" entrypoint.sh
 echo "Copied custom Dockerfile to build directory"
 
 # Build Docker image
