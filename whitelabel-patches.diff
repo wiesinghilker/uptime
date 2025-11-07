@@ -359,16 +359,9 @@ index 00000000..953edd92
 +COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/package.json /app/package.json
 +COPY --from=builder --chown=uptime-kuma:uptime-kuma /app/.npmrc /app/.npmrc
 +
-+# Create data directory with correct ownership
-+RUN mkdir -p /app/data && \
-+    chown uptime-kuma:uptime-kuma /app/data
-+
 +# Set environment
 +ENV NODE_ENV=production \
 +    UPTIME_KUMA_IS_CONTAINER=1
-+
-+# Declare volume
-+VOLUME ["/app/data"]
 +
 +# Switch to non-root user
 +USER uptime-kuma
