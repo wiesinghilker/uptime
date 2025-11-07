@@ -56,6 +56,13 @@ jobs:
           git apply --index --reject --whitespace=nowarn ../whitelabel-patches.diff
           echo "Applied whitelabel-patches.diff"
 
+      - name: Copy Dockerfile
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp Dockerfile uptime-kuma/Dockerfile
+          echo "Copied custom Dockerfile to uptime-kuma/"
+
       - name: Build and push (whitelabel, linux/arm64)
         uses: docker/build-push-action@v6
         with:

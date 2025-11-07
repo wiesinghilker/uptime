@@ -49,6 +49,12 @@ cd "${BUILD_DIR}/uptime-kuma"
 git apply --index --reject --whitespace=nowarn "${PATCH_FILE}"
 echo "Applied whitelabel-patches.diff"
 
+# Copy Dockerfile
+echo ""
+echo "Copying custom Dockerfile..."
+cp "${SCRIPT_DIR}/Dockerfile" Dockerfile
+echo "Copied custom Dockerfile to build directory"
+
 # Build Docker image
 echo ""
 echo "Building Docker image..."
